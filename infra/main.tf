@@ -68,6 +68,58 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
+# Cache Policy customizada para preservar Content-Type e outros headers do origin
+resource "aws_cloudfront_cache_policy" "frontend" {
+  count       = local.should_create_resources ? 1 : 0
+  name        = "${var.project_name}-frontend-cache-policy-${var.environment}"
+  comment     = "Cache policy para ${var.project_name} frontend - preserva Content-Type do origin"
+  default_ttl = 86400
+  max_ttl     = 31536000
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip    = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+
+    headers_config {
+      header_behavior = "whitelist"
+      headers {
+        items = ["Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method"]
+      }
+    }
+
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
+
+# Origin Request Policy customizada (não envia query strings ou cookies)
+resource "aws_cloudfront_origin_request_policy" "frontend" {
+  count   = local.should_create_resources ? 1 : 0
+  name    = "${var.project_name}-frontend-origin-request-policy-${var.environment}"
+  comment = "Origin request policy para ${var.project_name} frontend"
+
+  cookies_config {
+    cookie_behavior = "none"
+  }
+
+  headers_config {
+    header_behavior = "whitelist"
+    headers {
+      items = ["Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method"]
+    }
+  }
+
+  query_strings_config {
+    query_string_behavior = "none"
+  }
+}
+
 # Data source para obter account ID atual
 data "aws_caller_identity" "current" {}
 
@@ -109,12 +161,11 @@ resource "aws_cloudfront_distribution" "frontend" {
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
 
-    # Usar managed cache policy (recomendado pela AWS)
-    # CachingOptimized: otimizada para sites estáticos, preserva headers do origin
-    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f3"
+    # Usar cache policy customizada que preserva Content-Type e outros headers do origin
+    cache_policy_id = aws_cloudfront_cache_policy.frontend[0].id
 
-    # Usar managed origin request policy (não envia query strings ou cookies)
-    origin_request_policy_id = "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf"
+    # Usar origin request policy customizada (não envia query strings ou cookies)
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.frontend[0].id
   }
 
   # Configuração de domínio customizado (opcional)
@@ -149,7 +200,9 @@ resource "aws_cloudfront_distribution" "frontend" {
   depends_on = [
     aws_s3_bucket.frontend,
     aws_cloudfront_origin_access_control.frontend,
-    aws_s3_bucket_public_access_block.frontend
+    aws_s3_bucket_public_access_block.frontend,
+    aws_cloudfront_cache_policy.frontend,
+    aws_cloudfront_origin_request_policy.frontend
   ]
 }
 
