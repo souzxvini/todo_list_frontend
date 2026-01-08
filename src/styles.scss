@@ -1,0 +1,60 @@
+/* You can add global styles to this file, and also import other style files */
+html {
+    width: 100%;
+    height: 100%;
+    font-family: 'Open Sans', sans-serif;
+    font-size: 14px !important;
+}
+  
+body {
+    background-position: center;
+    background-attachment: fixed;
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-image: url(https://d2gc27jy00o0yk.cloudfront.net/default-assets/image/cognito-image-background-page-light.svg);
+    margin: 0;
+    padding: 16px;
+    font-size: 14px;
+    color: #424650;
+    scroll-behavior: smooth;
+    //scrollbar-gutter: stable;
+}
+
+p, span, h1, h2, h3, h4, h5, h6 {
+    margin: 0;
+    padding: 0;
+    font-family: 'Open Sans', sans-serif !important;
+    font-size: 14px;
+    color: #424650;
+}
+
+.title {
+    font-size: 24px;
+    color: #0f141a;
+    font-weight: 700;
+}
+
+.mat-mdc-fab-base .mdc-button__label {
+    color: white !important;
+    font-weight: 700 !important;
+    font-family: 'Open Sans', sans-serif !important;
+}
+
+.mat-mdc-extended-fab {
+    box-shadow: none !important;
+    height: 40px !important;
+    color: white !important;
+    background-color: #9e58e9 !important;
+    border-radius: 12px !important;
+}
+
+.mat-grid-tile-content {
+    align-items: start !important;
+    justify-content: start !important;
+    border-radius: 12px !important;
+    box-shadow: rgba(255, 255, 255, 0.2) 0px 0px 0px 1px inset, rgba(54, 54, 54, 0.9) 0px 0px 0px 1px !important;
+}
+
+.mat-grid-tile {
+    border-radius: 12px !important;
+}

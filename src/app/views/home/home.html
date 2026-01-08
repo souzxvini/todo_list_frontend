@@ -1,0 +1,73 @@
+<div class="container">
+  <div class="header">
+    <h1 class="header-title">To do List</h1>
+    <button matFab extended (click)="logout()">
+      <mat-icon>logout</mat-icon>
+      Sair
+    </button>
+  </div>
+
+  <div class="input-container">
+    <button matFab extended>
+      <mat-icon>add</mat-icon>
+      Nova Tarefa
+    </button>
+  </div>
+
+  <div class="panels-grid">
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Backlog</h2>
+        <p>Total de itens nessa coluna: 4</p>
+      </div>
+
+      <div cdkDropList #todoList="cdkDropList" [cdkDropListData]="todo" 
+        [cdkDropListConnectedTo]="[inProgressList, doneList]"
+        class="tasks-list" (cdkDropListDropped)="drop($event)">
+        @for (item of todo; track item) {
+        <div class="task-item" cdkDrag>
+          <h1 class="task-item-title"> Titulo da tarefa </h1>
+          <p> lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet</p>
+          <p class="disclaimer"> há 2 dias nesta coluna </p>
+        </div>
+        }
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Em andamento</h2>
+        <p>Total de itens nessa coluna: {{ inProgress.length }}</p>
+      </div>
+      <div cdkDropList #inProgressList="cdkDropList" [cdkDropListData]="inProgress" 
+        [cdkDropListConnectedTo]="[todoList, doneList]"
+        class="tasks-list" (cdkDropListDropped)="drop($event)">
+        @for (item of inProgress; track item) {
+          <div class="task-item" cdkDrag>
+            <h1 class="task-item-title"> Titulo da tarefa </h1>
+            <p> lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet</p>
+            <p class="disclaimer"> há 2 dias nesta coluna </p>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Concluído</h2>
+        <p>Total de itens nessa coluna: {{ done.length }}</p>
+      </div>
+      <div cdkDropList #doneList="cdkDropList" [cdkDropListData]="done" 
+        [cdkDropListConnectedTo]="[todoList, inProgressList]"
+        class="tasks-list" (cdkDropListDropped)="drop($event)">
+        @for (item of done; track item) {
+          <div class="task-item done" cdkDrag>
+            <h1 class="task-item-title"> Titulo da tarefa </h1>
+            <p class="task-item-description"> lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet</p>
+            <p class="disclaimer"> há 2 dias nesta coluna </p>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+</div>
