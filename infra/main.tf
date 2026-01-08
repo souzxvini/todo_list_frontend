@@ -1,8 +1,9 @@
 locals {
-  create = var.enable_create_resources
-  has_cert = trim(var.certificate_arn) != ""
-  aliases  = trim(var.domain_name) != "" ? [var.domain_name] : []
+  create   = var.enable_create_resources
+  has_cert = trimspace(var.certificate_arn) != ""
+  aliases  = trimspace(var.domain_name) != "" ? [trimspace(var.domain_name)] : []
 }
+
 
 # -----------------------
 # S3 (privado)
