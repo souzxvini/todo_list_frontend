@@ -86,35 +86,35 @@ resource "aws_cloudfront_distribution" "frontend" {
   default_root_object = "index.html"
 
   # SPA Routing: redirecionar 404 e 403 para index.html
+  # Nota: Isso só deve aplicar a rotas, não a arquivos estáticos
+  # Arquivos estáticos devem existir no S3 com Content-Type correto
   custom_error_response {
     error_code         = 404
     response_code      = 200
     response_page_path = "/index.html"
+    error_caching_min_ttl = 300
   }
 
   custom_error_response {
     error_code         = 403
     response_code      = 200
     response_page_path = "/index.html"
+    error_caching_min_ttl = 300
   }
 
   default_cache_behavior {
-    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
-    cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "S3-${aws_s3_bucket.frontend[0].id}"
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "S3-${aws_s3_bucket.frontend[0].id}"
     viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
     compress               = true
+
+    # Usar managed cache policy (recomendado pela AWS)
+    # CachingOptimized: otimizada para sites estáticos, preserva headers do origin
+    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f3"
+
+    # Usar managed origin request policy (não envia query strings ou cookies)
+    origin_request_policy_id = "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf"
   }
 
   # Configuração de domínio customizado (opcional)

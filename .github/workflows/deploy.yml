@@ -131,22 +131,52 @@ jobs:
           
           echo "Uploading from: $BUILD_DIR to s3://$BUCKET_NAME/"
           
-          # Upload arquivos estáticos (JS, CSS, imagens) com cache longo
+          # Upload arquivos JavaScript com Content-Type correto e cache longo
           aws s3 sync "$BUILD_DIR" s3://$BUCKET_NAME/ \
             --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --content-type "application/javascript" \
+            --exclude "*" \
+            --include "*.js" \
+            --include "*.mjs"
+
+          # Upload arquivos CSS com Content-Type correto e cache longo
+          aws s3 sync "$BUILD_DIR" s3://$BUCKET_NAME/ \
+            --cache-control "public, max-age=31536000, immutable" \
+            --content-type "text/css" \
+            --exclude "*" \
+            --include "*.css"
+
+          # Upload imagens e outros assets com cache longo
+          aws s3 sync "$BUILD_DIR" s3://$BUCKET_NAME/ \
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "*.html" \
             --exclude "*.json" \
             --exclude "*.txt" \
+            --exclude "*.js" \
+            --exclude "*.mjs" \
+            --exclude "*.css" \
             --exclude "robots.txt" \
             --exclude "sitemap.xml"
 
-          # Upload HTML, JSON, TXT e outros arquivos de conteúdo com cache curto
+          # Upload HTML com Content-Type correto e cache curto
+          aws s3 sync "$BUILD_DIR" s3://$BUCKET_NAME/ \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --content-type "text/html" \
+            --exclude "*" \
+            --include "*.html"
+
+          # Upload JSON com Content-Type correto e cache curto
+          aws s3 sync "$BUILD_DIR" s3://$BUCKET_NAME/ \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --content-type "application/json" \
+            --exclude "*" \
+            --include "*.json"
+
+          # Upload TXT e outros arquivos de conteúdo com cache curto
           aws s3 sync "$BUILD_DIR" s3://$BUCKET_NAME/ \
             --cache-control "public, max-age=0, must-revalidate" \
             --exclude "*" \
-            --include "*.html" \
-            --include "*.json" \
             --include "*.txt" \
             --include "robots.txt" \
             --include "sitemap.xml"
