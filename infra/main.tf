@@ -87,12 +87,12 @@ resource "aws_cloudfront_distribution" "frontend" {
     error_caching_min_ttl = 0
   }
 
-  #custom_error_response {
-  #  error_code            = 403
-  #  response_code         = 200
-  #  response_page_path    = "/index.html"
-  #  error_caching_min_ttl = 0
-  #}
+  custom_error_response {
+    error_code            = 403
+    response_code         = 200
+    response_page_path    = "/index.html"
+    error_caching_min_ttl = 0
+  }
 
   default_cache_behavior {
     target_origin_id       = "s3-frontend"
@@ -101,9 +101,6 @@ resource "aws_cloudfront_distribution" "frontend" {
 
     allowed_methods = ["GET", "HEAD", "OPTIONS"]
     cached_methods  = ["GET", "HEAD"]
-
-    cache_policy_id          = "658327ea-f89d-4fab-a63d-7e88639e58f6"
-    origin_request_policy_id = "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf"
   }
 
   viewer_certificate {
@@ -134,27 +131,6 @@ resource "aws_cloudfront_distribution" "frontend" {
   ]
 }
 
-resource "aws_cloudfront_cache_policy" "frontend" {
-  count       = local.create ? 1 : 0
-  name        = "${var.project_name}-frontend-cache-policy-${var.environment}"
-  default_ttl = 86400
-  max_ttl     = 31536000
-  min_ttl     = 0
-
-  parameters_in_cache_key_and_forwarded_to_origin {
-    enable_accept_encoding_gzip   = true
-    enable_accept_encoding_brotli = true
-
-    cookies_config { cookie_behavior = "none" }
-    headers_config { header_behavior = "none" }
-    query_strings_config { query_string_behavior = "none" }
-  }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
 resource "aws_cloudfront_origin_request_policy" "frontend" {
   count   = local.create ? 1 : 0
   name    = "${var.project_name}-frontend-origin-request-policy-${var.environment}"
@@ -167,7 +143,6 @@ resource "aws_cloudfront_origin_request_policy" "frontend" {
     prevent_destroy = true
   }
 }
-
 
 # -----------------------
 # Bucket policy (OAC -> S3 GetObject)
