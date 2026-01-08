@@ -114,8 +114,12 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   restrictions {
-    geo_restriction {
-      restriction_type = "none"
+    dynamic "geo_restriction" {
+      for_each = [1]
+      content {
+        restriction_type = "none"
+        # NÃO declare locations aqui (nem vazio)
+      }
     }
   }
 
