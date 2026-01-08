@@ -1,21 +1,14 @@
-# Local para controlar criação de recursos
 locals {
-  should_create_resources = var.enable_create_resources
-  use_custom_certificate  = var.certificate_arn != ""
-  
-  # Configuração do viewer_certificate
-  viewer_certificate_config = local.use_custom_certificate ? {
-    acm_certificate_arn      = var.certificate_arn
-    ssl_support_method       = "sni-only"
-    minimum_protocol_version = "TLSv1.2_2021"
-  } : {
-    cloudfront_default_certificate = true
-  }
+  create = var.enable_create_resources
+  has_cert = trim(var.certificate_arn) != ""
+  aliases  = trim(var.domain_name) != "" ? [var.domain_name] : []
 }
 
-# S3 Bucket para hospedar arquivos estáticos
+# -----------------------
+# S3 (privado)
+# -----------------------
 resource "aws_s3_bucket" "frontend" {
-  count  = local.should_create_resources ? 1 : 0
+  count  = local.create ? 1 : 0
   bucket = var.s3_bucket_name
 
   tags = {
@@ -25,9 +18,18 @@ resource "aws_s3_bucket" "frontend" {
   }
 }
 
-# S3 Bucket Versioning
+resource "aws_s3_bucket_public_access_block" "frontend" {
+  count  = local.create ? 1 : 0
+  bucket = aws_s3_bucket.frontend[0].id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 resource "aws_s3_bucket_versioning" "frontend" {
-  count  = local.should_create_resources ? 1 : 0
+  count  = local.create ? 1 : 0
   bucket = aws_s3_bucket.frontend[0].id
 
   versioning_configuration {
@@ -35,9 +37,8 @@ resource "aws_s3_bucket_versioning" "frontend" {
   }
 }
 
-# S3 Bucket Server-Side Encryption
 resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
-  count  = local.should_create_resources ? 1 : 0
+  count  = local.create ? 1 : 0
   bucket = aws_s3_bucket.frontend[0].id
 
   rule {
@@ -47,149 +48,81 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
   }
 }
 
-# S3 Bucket Public Access Block
-resource "aws_s3_bucket_public_access_block" "frontend" {
-  count  = local.should_create_resources ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-# Origin Access Control (OAC) para CloudFront acessar o bucket S3
+# -----------------------
+# CloudFront OAC
+# -----------------------
 resource "aws_cloudfront_origin_access_control" "frontend" {
-  count                             = local.should_create_resources ? 1 : 0
+  count                             = local.create ? 1 : 0
   name                              = "${var.project_name}-frontend-oac-${var.environment}"
-  description                       = "OAC para ${var.project_name} frontend bucket"
+  description                       = "OAC for ${var.project_name} frontend"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
 }
 
-# Cache Policy customizada para preservar Content-Type e outros headers do origin
-resource "aws_cloudfront_cache_policy" "frontend" {
-  count       = local.should_create_resources ? 1 : 0
-  name        = "${var.project_name}-frontend-cache-policy-${var.environment}"
-  comment     = "Cache policy para ${var.project_name} frontend - preserva Content-Type do origin"
-  default_ttl = 86400
-  max_ttl     = 31536000
-  min_ttl     = 0
-
-  parameters_in_cache_key_and_forwarded_to_origin {
-    enable_accept_encoding_brotli = true
-    enable_accept_encoding_gzip    = true
-
-    cookies_config {
-      cookie_behavior = "none"
-    }
-
-    headers_config {
-      header_behavior = "whitelist"
-      headers {
-        items = ["Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method"]
-      }
-    }
-
-    query_strings_config {
-      query_string_behavior = "none"
-    }
-  }
-}
-
-# Origin Request Policy customizada (não envia query strings ou cookies)
-resource "aws_cloudfront_origin_request_policy" "frontend" {
-  count   = local.should_create_resources ? 1 : 0
-  name    = "${var.project_name}-frontend-origin-request-policy-${var.environment}"
-  comment = "Origin request policy para ${var.project_name} frontend"
-
-  cookies_config {
-    cookie_behavior = "none"
-  }
-
-  headers_config {
-    header_behavior = "whitelist"
-    headers {
-      items = ["Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method"]
-    }
-  }
-
-  query_strings_config {
-    query_string_behavior = "none"
-  }
-}
-
-# Data source para obter account ID atual
-data "aws_caller_identity" "current" {}
-
+# -----------------------
 # CloudFront Distribution
+# -----------------------
 resource "aws_cloudfront_distribution" "frontend" {
-  count   = local.should_create_resources ? 1 : 0
-  comment = "${var.project_name} frontend distribution"
+  count   = local.create ? 1 : 0
   enabled = true
+  comment = "${var.project_name} frontend distribution"
 
   origin {
     domain_name              = aws_s3_bucket.frontend[0].bucket_regional_domain_name
-    origin_id                = "S3-${aws_s3_bucket.frontend[0].id}"
+    origin_id                = "s3-frontend"
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend[0].id
   }
 
   default_root_object = "index.html"
+  aliases             = local.aliases
+  price_class         = var.price_class
 
-  # SPA Routing: redirecionar 404 e 403 para index.html
-  # Nota: Isso só deve aplicar a rotas, não a arquivos estáticos
-  # Arquivos estáticos devem existir no S3 com Content-Type correto
+  # SPA fallback (rotas)
   custom_error_response {
-    error_code         = 404
-    response_code      = 200
-    response_page_path = "/index.html"
-    error_caching_min_ttl = 300
+    error_code            = 404
+    response_code         = 200
+    response_page_path    = "/index.html"
+    error_caching_min_ttl = 0
   }
 
   custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-    error_caching_min_ttl = 300
+    error_code            = 403
+    response_code         = 200
+    response_page_path    = "/index.html"
+    error_caching_min_ttl = 0
   }
 
   default_cache_behavior {
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "S3-${aws_s3_bucket.frontend[0].id}"
+    target_origin_id       = "s3-frontend"
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
 
-    # Usar cache policy customizada que preserva Content-Type e outros headers do origin
-    cache_policy_id = aws_cloudfront_cache_policy.frontend[0].id
+    allowed_methods = ["GET", "HEAD", "OPTIONS"]
+    cached_methods  = ["GET", "HEAD"]
 
-    # Usar origin request policy customizada (não envia query strings ou cookies)
-    origin_request_policy_id = aws_cloudfront_origin_request_policy.frontend[0].id
+    # Para site estático, não precisa cookies/query strings
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
   }
 
-  # Configuração de domínio customizado (opcional)
-  aliases = var.domain_name != "" ? [var.domain_name] : []
-
-  # Viewer certificate - default ou customizado
-  # Usa certificado customizado se certificate_arn for fornecido, senão usa default do CloudFront
   viewer_certificate {
-    cloudfront_default_certificate = !local.use_custom_certificate
-    acm_certificate_arn            = local.use_custom_certificate ? var.certificate_arn : null
-    ssl_support_method             = local.use_custom_certificate ? "sni-only" : null
-    minimum_protocol_version       = local.use_custom_certificate ? "TLSv1.2_2021" : null
+    cloudfront_default_certificate = local.has_cert ? false : true
+    acm_certificate_arn            = local.has_cert ? var.certificate_arn : null
+    ssl_support_method             = local.has_cert ? "sni-only" : null
+    minimum_protocol_version       = local.has_cert ? "TLSv1.2_2021" : null
   }
 
   restrictions {
     geo_restriction {
-      restriction_type = var.price_class == "PriceClass_All" ? "none" : "whitelist"
-      locations        = var.price_class == "PriceClass_100" ? ["US", "CA", "GB", "DE"] : (
-        var.price_class == "PriceClass_200" ? ["US", "CA", "GB", "DE", "FR", "IT", "ES", "NL", "BE", "AT", "SE", "DK", "NO", "FI", "IE", "PT", "PL"] : []
-      )
+      restriction_type = "none"
     }
   }
-
-  price_class = var.price_class
 
   tags = {
     Name        = "${var.project_name}-frontend-distribution"
@@ -198,41 +131,32 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   depends_on = [
-    aws_s3_bucket.frontend,
-    aws_cloudfront_origin_access_control.frontend,
-    aws_s3_bucket_public_access_block.frontend,
-    aws_cloudfront_cache_policy.frontend,
-    aws_cloudfront_origin_request_policy.frontend
+    aws_s3_bucket_public_access_block.frontend
   ]
 }
 
-# Bucket Policy para permitir acesso apenas via CloudFront OAC
+# -----------------------
+# Bucket policy (OAC -> S3 GetObject)
+# -----------------------
 resource "aws_s3_bucket_policy" "frontend" {
-  count  = local.should_create_resources ? 1 : 0
+  count  = local.create ? 1 : 0
   bucket = aws_s3_bucket.frontend[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowCloudFrontServicePrincipal"
-        Effect = "Allow"
-        Principal = {
-          Service = "cloudfront.amazonaws.com"
-        }
-        Action   = "s3:GetObject"
-        Resource = "${aws_s3_bucket.frontend[0].arn}/*"
-        Condition = {
-          StringEquals = {
-            "AWS:SourceArn" = aws_cloudfront_distribution.frontend[0].arn
-          }
+    Statement = [{
+      Sid    = "AllowCloudFrontServicePrincipal"
+      Effect = "Allow"
+      Principal = {
+        Service = "cloudfront.amazonaws.com"
+      }
+      Action   = "s3:GetObject"
+      Resource = "${aws_s3_bucket.frontend[0].arn}/*"
+      Condition = {
+        StringEquals = {
+          "AWS:SourceArn" = aws_cloudfront_distribution.frontend[0].arn
         }
       }
-    ]
+    }]
   })
-
-  depends_on = [
-    aws_cloudfront_distribution.frontend
-  ]
 }
-
