@@ -1,0 +1,173 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: ["master", "main"]
+    paths:
+      - "src/**"
+      - "infra/**"
+      - ".github/workflows/deploy.yml"
+      - "angular.json"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Validate AWS variables
+        run: |
+          if [ -z "${{ vars.AWS_REGION }}" ]; then
+            echo "AWS_REGION is empty. Configure it in GitHub: Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+
+          if [ -z "${{ vars.AWS_ROLE_ARN }}" ]; then
+            echo "AWS_ROLE_ARN is empty. Configure it in GitHub: Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+
+          if [ -z "${{ vars.TF_STATE_BUCKET_NAME }}" ]; then
+            echo "TF_STATE_BUCKET_NAME is empty. Configure it in GitHub: Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+
+          if [ -z "${{ vars.S3_BUCKET_NAME }}" ]; then
+            echo "S3_BUCKET_NAME is empty. Configure it in GitHub: Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+
+      # ========== Terraform: Provisionar Infraestrutura ==========
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Init (remote backend)
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_NAME }}" \
+            -backend-config="key=todolist/dev/frontend.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="dynamodb_table=terraform-locks" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform Validate
+        working-directory: infra
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: infra
+        run: |
+          terraform plan \
+            -var="s3_bucket_name=${{ vars.S3_BUCKET_NAME }}" \
+            -var="project_name=${{ vars.PROJECT_NAME }}" \
+            -var="environment=${{ vars.ENVIRONMENT }}" \
+            -var="aws_region=${{ vars.AWS_REGION }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: infra
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get CloudFront Distribution ID
+        id: cloudfront
+        working-directory: infra
+        run: |
+          DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id)
+          echo "distribution_id=$DISTRIBUTION_ID" >> $GITHUB_OUTPUT
+
+      # ========== Build: Angular Application ==========
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Angular application
+        run: npm run build -- --configuration production
+
+      # ========== Deploy: Upload to S3 ==========
+      - name: Detect build output directory
+        id: build_dir
+        run: |
+          if [ -d "dist/todo_list_frontend/browser" ]; then
+            BUILD_DIR="dist/todo_list_frontend/browser"
+          elif [ -d "dist/browser" ]; then
+            BUILD_DIR="dist/browser"
+          elif [ -d "dist" ]; then
+            BUILD_DIR="dist"
+          else
+            echo "Error: Build output directory not found"
+            ls -la dist/ || echo "dist directory does not exist"
+            exit 1
+          fi
+
+          echo "build_dir=$BUILD_DIR" >> $GITHUB_OUTPUT
+          echo "Building from: $BUILD_DIR"
+
+      - name: Upload files to S3
+        run: |
+          BUILD_DIR="${{ steps.build_dir.outputs.build_dir }}"
+          BUCKET_NAME="${{ vars.S3_BUCKET_NAME }}"
+          
+          echo "Uploading from: $BUILD_DIR to s3://$BUCKET_NAME/"
+          
+          # Upload arquivos estáticos (JS, CSS, imagens) com cache longo
+          aws s3 sync "$BUILD_DIR" s3://$BUCKET_NAME/ \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*.html" \
+            --exclude "*.json" \
+            --exclude "*.txt" \
+            --exclude "robots.txt" \
+            --exclude "sitemap.xml"
+
+          # Upload HTML, JSON, TXT e outros arquivos de conteúdo com cache curto
+          aws s3 sync "$BUILD_DIR" s3://$BUCKET_NAME/ \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --exclude "*" \
+            --include "*.html" \
+            --include "*.json" \
+            --include "*.txt" \
+            --include "robots.txt" \
+            --include "sitemap.xml"
+
+          echo "✅ Files uploaded successfully to s3://$BUCKET_NAME/"
+
+      # ========== Invalidate CloudFront Cache ==========
+      - name: Invalidate CloudFront cache
+        if: steps.cloudfront.outputs.distribution_id != ''
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.cloudfront.outputs.distribution_id }}" \
+            --paths "/*"
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket**: ${{ vars.S3_BUCKET_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **CloudFront Distribution ID**: ${{ steps.cloudfront.outputs.distribution_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ vars.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
+
