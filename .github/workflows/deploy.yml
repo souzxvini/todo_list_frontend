@@ -1,23 +1,29 @@
-name: Deploy Frontend
+name: Provision Infra + Deploy Angular
 
 on:
   push:
-    branches: ["master", "main"]
-    paths:
-      - "src/**"
-      - "infra/**"
-      - ".github/workflows/deploy.yml"
-      - "angular.json"
-      - "package.json"
-      - "package-lock.json"
+    branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
 
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  TF_STATE_BUCKET_NAME: ${{ vars.TF_STATE_BUCKET_NAME }}
+  # Se você aplicou o patch do Terraform (bucket_name), use S3_BUCKET_NAME:
+  S3_BUCKET_NAME: ${{ vars.S3_BUCKET_NAME }}
+
 jobs:
-  deploy:
+  terraform:
+    name: Terraform Apply
     runs-on: ubuntu-latest
+
+    outputs:
+      bucket_name: ${{ steps.tf_outputs.outputs.bucket_name }}
+      distribution_id: ${{ steps.tf_outputs.outputs.distribution_id }}
 
     steps:
       - name: Checkout
@@ -26,74 +32,49 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
 
-      - name: Validate AWS variables
-        run: |
-          if [ -z "${{ vars.AWS_REGION }}" ]; then
-            echo "AWS_REGION is empty. Configure it in GitHub: Settings > Secrets and variables > Actions > Variables."
-            exit 1
-          fi
-
-          if [ -z "${{ vars.AWS_ROLE_ARN }}" ]; then
-            echo "AWS_ROLE_ARN is empty. Configure it in GitHub: Settings > Secrets and variables > Actions > Variables."
-            exit 1
-          fi
-
-          if [ -z "${{ vars.TF_STATE_BUCKET_NAME }}" ]; then
-            echo "TF_STATE_BUCKET_NAME is empty. Configure it in GitHub: Settings > Secrets and variables > Actions > Variables."
-            exit 1
-          fi
-
-          if [ -z "${{ vars.S3_BUCKET_NAME }}" ]; then
-            echo "S3_BUCKET_NAME is empty. Configure it in GitHub: Settings > Secrets and variables > Actions > Variables."
-            exit 1
-          fi
-
-      # ========== Terraform: Provisionar Infraestrutura ==========
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.7.5"
 
-      - name: Terraform Init (remote backend)
-        working-directory: infra
+      - name: Terraform Init
         run: |
           terraform init \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_NAME }}" \
-            -backend-config="key=todolist/dev/frontend.tfstate" \
-            -backend-config="region=${{ vars.AWS_REGION }}" \
-            -backend-config="dynamodb_table=terraform-locks" \
-            -backend-config="encrypt=true"
-
-      - name: Terraform Validate
-        working-directory: infra
-        run: terraform validate
+            -backend-config="bucket=${TF_STATE_BUCKET_NAME}" \
+            -backend-config="key=profile/prod/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
 
       - name: Terraform Plan
-        working-directory: infra
         run: |
-          terraform plan \
-            -var="s3_bucket_name=${{ vars.S3_BUCKET_NAME }}" \
-            -var="project_name=${{ vars.PROJECT_NAME }}" \
-            -var="environment=${{ vars.ENVIRONMENT }}" \
-            -var="aws_region=${{ vars.AWS_REGION }}" \
-            -out=tfplan
+          terraform plan -out=tfplan \
+            -var="bucket_name=${S3_BUCKET_NAME}"
 
       - name: Terraform Apply
-        working-directory: infra
         run: terraform apply -auto-approve tfplan
 
-      - name: Get CloudFront Distribution ID
-        id: cloudfront
-        working-directory: infra
+      - name: Read Terraform outputs
+        id: tf_outputs
+        shell: bash
         run: |
-          DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id)
-          echo "distribution_id=$DISTRIBUTION_ID" >> $GITHUB_OUTPUT
+          BUCKET_NAME="$(terraform output -raw bucket_name)"
+          DIST_ID="$(terraform output -raw cloudfront_distribution_id)"
 
-      # ========== Build: Angular Application ==========
-      - name: Setup Node.js
+          echo "bucket_name=$BUCKET_NAME" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$DIST_ID" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Build + Deploy Angular
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -102,70 +83,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Angular application
+      - name: Build Angular
         run: npm run build -- --configuration production
 
-      # ========== Deploy: Upload to S3 ==========
-      - name: Detect build output directory
-        id: build_dir
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+
+      - name: Upload to S3 (sync)
+        shell: bash
         run: |
-          if [ -d "dist/todo_list_frontend/browser" ]; then
-            BUILD_DIR="dist/todo_list_frontend/browser"
-          elif [ -d "dist/browser" ]; then
-            BUILD_DIR="dist/browser"
-          elif [ -d "dist" ]; then
-            BUILD_DIR="dist"
-          else
-            echo "Error: Build output directory not found"
-            ls -la dist/ || echo "dist directory does not exist"
-            exit 1
-          fi
+          # Ajuste o caminho do dist se necessário:
+          # Angular normalmente gera dist/<nome-do-projeto>/browser (Angular 17+) ou dist/<nome-do-projeto>
+          #
+          # Opção 1 (mais comum):
+          # DIST_DIR="dist/<SEU_PROJETO>"
+          #
+          # Opção 2 (Angular SSR/Builders modernos):
+          # DIST_DIR="dist/<SEU_PROJETO>/browser"
 
-          echo "build_dir=$BUILD_DIR" >> $GITHUB_OUTPUT
-          echo "Building from: $BUILD_DIR"
+          # Tentativa automática (pega o primeiro diretório dentro de dist):
+          DIST_DIR="$(ls -d dist/* | head -n 1)"
+          echo "Using DIST_DIR=$DIST_DIR"
 
-      - name: Upload files to S3 (deterministic cache rules)
-        run: |
-          set -e
-
-          BUILD_DIR="${{ steps.build_dir.outputs.build_dir }}"
-          BUCKET_NAME="${{ vars.S3_BUCKET_NAME }}"
-
-          echo "Uploading from: $BUILD_DIR to s3://$BUCKET_NAME/"
-
-          # 1) Envia TUDO com cache longo, exceto index.html (assets com hash podem cachear 1 ano)
-          aws s3 sync "$BUILD_DIR" "s3://$BUCKET_NAME/" \
+          aws s3 sync "$DIST_DIR" "s3://${{ needs.terraform.outputs.bucket_name }}/" \
             --delete \
-            --exclude "index.html" \
-            --cache-control "public, max-age=31536000, immutable"
+            --only-show-errors
 
-          # 2) Envia index.html separado com cache curto (para evitar index antigo apontando para JS antigo)
-          if [ -f "$BUILD_DIR/index.html" ]; then
-            aws s3 cp "$BUILD_DIR/index.html" "s3://$BUCKET_NAME/index.html" \
-              --cache-control "public, max-age=0, must-revalidate" \
-              --content-type "text/html"
-          else
-            echo "Error: index.html not found in $BUILD_DIR"
-            ls -la "$BUILD_DIR"
-            exit 1
-          fi
-
-          echo "✅ Files uploaded successfully to s3://$BUCKET_NAME/"
-
-      # ========== Invalidate CloudFront Cache ==========
-      - name: Invalidate CloudFront cache
-        if: steps.cloudfront.outputs.distribution_id != ''
+      - name: CloudFront Invalidation
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id "${{ steps.cloudfront.outputs.distribution_id }}" \
-            --paths "/index.html" "/*"
-
-      - name: Deployment Summary
-        run: |
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **S3 Bucket**: ${{ vars.S3_BUCKET_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **CloudFront Distribution ID**: ${{ steps.cloudfront.outputs.distribution_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Region**: ${{ vars.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
+            --distribution-id "${{ needs.terraform.outputs.distribution_id }}" \
+            --paths "/*"

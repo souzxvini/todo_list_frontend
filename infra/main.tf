@@ -1,27 +1,23 @@
-locals {
-  create   = var.enable_create_resources
-  has_cert = trimspace(var.certificate_arn) != ""
-  aliases  = trimspace(var.domain_name) != "" ? [trimspace(var.domain_name)] : []
+# Data source for current AWS account ID
+data "aws_caller_identity" "current" {}
+
+# S3 Bucket for Profile Website
+resource "aws_s3_bucket" "profile_bucket" {
+  bucket = var.bucket_name
+  force_destroy = true # Allow bucket to be destroyed even if not empty
 }
 
+resource "aws_s3_bucket_versioning" "profile_bucket_versioning" {
+  bucket = aws_s3_bucket.profile_bucket.id
 
-# -----------------------
-# S3 (privado)
-# -----------------------
-resource "aws_s3_bucket" "frontend" {
-  count  = local.create ? 1 : 0
-  bucket = var.s3_bucket_name
-
-  tags = {
-    Name        = "${var.project_name}-frontend"
-    Environment = var.environment
-    Project     = var.project_name
+  versioning_configuration {
+    status = "Enabled"
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "frontend" {
-  count  = local.create ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
+# Block public access - CloudFront will handle distribution
+resource "aws_s3_bucket_public_access_block" "profile_bucket_pab" {
+  bucket = aws_s3_bucket.profile_bucket.id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -29,57 +25,72 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   restrict_public_buckets = true
 }
 
-resource "aws_s3_bucket_versioning" "frontend" {
-  count  = local.create ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
-
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
-  count  = local.create ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-# -----------------------
-# CloudFront OAC
-# -----------------------
-resource "aws_cloudfront_origin_access_control" "frontend" {
-  count                             = local.create ? 1 : 0
-  name                              = "${var.project_name}-frontend-origin_access_control-${var.environment}"
-  description                       = "OAC for ${var.project_name} frontend"
+# CloudFront Origin Access Control
+resource "aws_cloudfront_origin_access_control" "profile_oac" {
+  name                              = "profile-oac"
+  description                       = "OAC for profile S3 bucket"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
 }
 
-# -----------------------
-# CloudFront Distribution
-# -----------------------
-resource "aws_cloudfront_distribution" "frontend" {
-  count   = local.create ? 1 : 0
-  enabled = true
-  comment = "${var.project_name} frontend distribution"
+# S3 Bucket Policy for CloudFront
+resource "aws_s3_bucket_policy" "profile_bucket_policy" {
+  bucket = aws_s3_bucket.profile_bucket.id
 
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "CloudFrontAccess"
+      Effect = "Allow"
+      Principal = {
+        Service = "cloudfront.amazonaws.com"
+      }
+      Action   = "s3:GetObject"
+      Resource = "${aws_s3_bucket.profile_bucket.arn}/*"
+      Condition = {
+        StringEquals = {
+          "AWS:SourceArn" = "arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/${aws_cloudfront_distribution.profile_distribution.id}"
+        }
+      }
+    }]
+  })
+}
+
+# CloudFront Distribution
+resource "aws_cloudfront_distribution" "profile_distribution" {
   origin {
-    domain_name              = aws_s3_bucket.frontend[0].bucket_regional_domain_name
-    origin_id                = "s3-frontend"
-    origin_access_control_id = aws_cloudfront_origin_access_control.frontend[0].id
+    domain_name            = aws_s3_bucket.profile_bucket.bucket_regional_domain_name
+    origin_id              = "S3ProfileBucket"
+    origin_access_control_id = aws_cloudfront_origin_access_control.profile_oac.id
   }
 
+  enabled             = true
+  is_ipv6_enabled     = true
   default_root_object = "index.html"
-  aliases             = local.aliases
+  aliases             = ["${var.profile_subdomain}.${var.domain_name}"]
   price_class         = var.price_class
 
-  # SPA fallback (rotas)
+  default_cache_behavior {
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "S3ProfileBucket"
+
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 3600
+    max_ttl                = 86400
+  }
+
+  # Handle 404s by returning index.html for SPA navigation
   custom_error_response {
     error_code            = 404
     response_code         = 200
@@ -87,84 +98,22 @@ resource "aws_cloudfront_distribution" "frontend" {
     error_caching_min_ttl = 0
   }
 
-  custom_error_response {
-    error_code            = 403
-    response_code         = 200
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 0
-  }
-
-  default_cache_behavior {
-    target_origin_id       = "s3-frontend"
-    viewer_protocol_policy = "redirect-to-https"
-    compress               = true
-
-    allowed_methods = ["GET", "HEAD", "OPTIONS"]
-    cached_methods  = ["GET", "HEAD"]
-  }
-
-  viewer_certificate {
-    cloudfront_default_certificate = local.has_cert ? false : true
-    acm_certificate_arn            = local.has_cert ? var.certificate_arn : null
-    ssl_support_method             = local.has_cert ? "sni-only" : null
-    minimum_protocol_version       = local.has_cert ? "TLSv1.2_2021" : null
-  }
-
   restrictions {
-    dynamic "geo_restriction" {
-      for_each = [1]
-      content {
-        restriction_type = "none"
-      }
+    geo_restriction {
+      restriction_type = "none"
     }
   }
 
+  # Use custom ACM certificate when provided via var.certificate_arn (set with TF_VAR_certificate_arn),
+  # otherwise fall back to CloudFront default certificate.
+  #viewer_certificate {
+  #  acm_certificate_arn            = var.certificate_arn != "" ? var.certificate_arn : null
+  #  ssl_support_method             = var.certificate_arn != "" ? "sni-only" : null
+  #  minimum_protocol_version       = var.certificate_arn != "" ? "TLSv1.2_2021" : null
+  #  cloudfront_default_certificate = var.certificate_arn == "" ? true : false
+  #}
+
   tags = {
-    Name        = "${var.project_name}-frontend-distribution"
-    Environment = var.environment
-    Project     = var.project_name
+    Name = "todo-list-distribution"
   }
-
-  depends_on = [
-    aws_s3_bucket_public_access_block.frontend
-  ]
-}
-
-resource "aws_cloudfront_origin_request_policy" "frontend" {
-  count   = local.create ? 1 : 0
-  name    = "${var.project_name}-frontend-orp-${var.environment}"
-
-  cookies_config { cookie_behavior = "none" }
-  headers_config { header_behavior = "none" }
-  query_strings_config { query_string_behavior = "none" }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-# -----------------------
-# Bucket policy (OAC -> S3 GetObject)
-# -----------------------
-resource "aws_s3_bucket_policy" "frontend" {
-  count  = local.create ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid    = "AllowCloudFrontServicePrincipal"
-      Effect = "Allow"
-      Principal = {
-        Service = "cloudfront.amazonaws.com"
-      }
-      Action   = "s3:GetObject"
-      Resource = "${aws_s3_bucket.frontend[0].arn}/*"
-      Condition = {
-        StringEquals = {
-          "AWS:SourceArn" = aws_cloudfront_distribution.frontend[0].arn
-        }
-      }
-    }]
-  })
 }

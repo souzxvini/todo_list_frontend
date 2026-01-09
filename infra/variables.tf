@@ -4,6 +4,10 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "bucket_name" {
+  type = string
+}
+
 variable "project_name" {
   type        = string
   description = "Nome do projeto (prefixo dos recursos)"
@@ -21,24 +25,6 @@ variable "s3_bucket_name" {
   description = "Nome do bucket S3 para hospedar o frontend"
 }
 
-variable "api_gateway_url" {
-  type        = string
-  description = "URL da API Gateway (opcional)"
-  default     = ""
-}
-
-variable "certificate_arn" {
-  type        = string
-  description = "ARN do certificado ACM para domínio customizado (opcional)"
-  default     = ""
-}
-
-variable "domain_name" {
-  type        = string
-  description = "Domínio customizado para CloudFront (opcional)"
-  default     = ""
-}
-
 variable "price_class" {
   type        = string
   description = "Price class do CloudFront (PriceClass_100, PriceClass_200, PriceClass_All)"
@@ -51,3 +37,26 @@ variable "enable_create_resources" {
   default     = true
 }
 
+variable "aws_region" {
+  type        = string
+  default     = "us-east-1"
+  description = "AWS region to deploy resources into"
+}
+
+variable "domain_name" {
+  type        = string
+  default     = "todolistsouzxvini.com"
+  description = "Root domain name"
+}
+
+variable "profile_subdomain" {
+  type        = string
+  default     = "souzxvini"
+  description = "Profile subdomain (e.g., my-profile.example.com)"
+}
+
+variable "certificate_arn" {
+  type        = string
+  default     = ""
+  description = "ACM certificate ARN for CloudFront. Set via environment variable TF_VAR_certificate_arn or terraform.tfvars. Certificate must be in us-east-1 for CloudFront."
+}
