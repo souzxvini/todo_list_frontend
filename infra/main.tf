@@ -3,7 +3,7 @@ data "aws_caller_identity" "current" {}
 
 # S3 Bucket for Profile Website
 resource "aws_s3_bucket" "profile_bucket" {
-  bucket = var.bucket_name
+  bucket        = var.bucket_name
   force_destroy = true # Allow bucket to be destroyed even if not empty
 }
 
@@ -77,8 +77,13 @@ resource "aws_cloudfront_distribution" "profile_distribution" {
     viewer_protocol_policy = "redirect-to-https"
 
     forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
+      # IMPORTANTE: como o Cognito volta com ?code=...&state=...
+      # é melhor permitir query string no request para o CloudFront.
+      query_string = true
+
+      cookies {
+        forward = "none"
+      }
     }
 
     min_ttl     = 0
@@ -86,6 +91,15 @@ resource "aws_cloudfront_distribution" "profile_distribution" {
     max_ttl     = 86400
   }
 
+  # SPA fallback para rotas (quando S3 responde 403 em bucket privado)
+  custom_error_response {
+    error_code            = 403
+    response_code         = 200
+    response_page_path    = "/index.html"
+    error_caching_min_ttl = 0
+  }
+
+  # SPA fallback para 404 também
   custom_error_response {
     error_code            = 404
     response_code         = 200
@@ -94,7 +108,9 @@ resource "aws_cloudfront_distribution" "profile_distribution" {
   }
 
   restrictions {
-    geo_restriction { restriction_type = "none" }
+    geo_restriction {
+      restriction_type = "none"
+    }
   }
 
   viewer_certificate {
@@ -103,4 +119,3 @@ resource "aws_cloudfront_distribution" "profile_distribution" {
 
   tags = { Name = "todo-list-distribution" }
 }
-
