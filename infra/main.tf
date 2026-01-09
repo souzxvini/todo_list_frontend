@@ -54,7 +54,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
 # -----------------------
 resource "aws_cloudfront_origin_access_control" "frontend" {
   count                             = local.create ? 1 : 0
-  name                              = "${var.project_name}-frontend-oac-${var.environment}"
+  name                              = "${var.project_name}-frontend-origin_access_control-${var.environment}"
   description                       = "OAC for ${var.project_name} frontend"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
@@ -132,7 +132,7 @@ resource "aws_cloudfront_distribution" "frontend" {
 
 resource "aws_cloudfront_origin_request_policy" "frontend" {
   count   = local.create ? 1 : 0
-  name    = "${var.project_name}-frontend-origin-request-policy-${var.environment}"
+  name    = "${var.project_name}-frontend-orp-${var.environment}"
 
   cookies_config { cookie_behavior = "none" }
   headers_config { header_behavior = "none" }
