@@ -60,37 +60,32 @@ resource "aws_s3_bucket_policy" "profile_bucket_policy" {
 # CloudFront Distribution
 resource "aws_cloudfront_distribution" "profile_distribution" {
   origin {
-    domain_name            = aws_s3_bucket.profile_bucket.bucket_regional_domain_name
-    origin_id              = "S3ProfileBucket"
+    domain_name              = aws_s3_bucket.profile_bucket.bucket_regional_domain_name
+    origin_id                = "S3ProfileBucket"
     origin_access_control_id = aws_cloudfront_origin_access_control.profile_oac.id
   }
 
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
-  aliases             = ["${var.profile_subdomain}.${var.domain_name}"]
   price_class         = var.price_class
 
   default_cache_behavior {
-    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
-    cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "S3ProfileBucket"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "S3ProfileBucket"
+    viewer_protocol_policy = "redirect-to-https"
 
     forwarded_values {
       query_string = false
-
-      cookies {
-        forward = "none"
-      }
+      cookies { forward = "none" }
     }
 
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
+    min_ttl     = 0
+    default_ttl = 3600
+    max_ttl     = 86400
   }
 
-  # Handle 404s by returning index.html for SPA navigation
   custom_error_response {
     error_code            = 404
     response_code         = 200
@@ -99,18 +94,13 @@ resource "aws_cloudfront_distribution" "profile_distribution" {
   }
 
   restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
+    geo_restriction { restriction_type = "none" }
   }
 
-  # Use custom ACM certificate when provided via var.certificate_arn (set with TF_VAR_certificate_arn),
-  # otherwise fall back to CloudFront default certificate.
   viewer_certificate {
-  cloudfront_default_certificate = true
+    cloudfront_default_certificate = true
+  }
+
+  tags = { Name = "todo-list-distribution" }
 }
 
-  tags = {
-    Name = "todo-list-distribution"
-  }
-}
