@@ -1,0 +1,43 @@
+<h2 mat-dialog-title>Nova Tarefa</h2>
+
+<mat-dialog-content>
+  <p>Crie uma nova tarefa para sua lista de tarefas.</p>
+  <form [formGroup]="taskForm" (ngSubmit)="onSubmit()" style="margin-top: 16px;">
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Título</mat-label>
+      <input matInput formControlName="titulo" required>
+      @if (taskForm.get('titulo')?.hasError('required') && taskForm.get('titulo')?.touched) {
+        <mat-error>Título é obrigatório</mat-error>
+      }
+    </mat-form-field>
+  
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Descrição</mat-label>
+      <textarea matInput formControlName="descricao" rows="4"></textarea>
+      @if (taskForm.get('descricao')?.hasError('required') && taskForm.get('descricao')?.touched) {
+        <mat-error>Descrição é obrigatório</mat-error>
+      }
+    </mat-form-field>
+  
+    <div class="checkbox-container">
+      <mat-checkbox formControlName="manterModalAberta">
+        <p>Manter modal aberta</p>
+      </mat-checkbox>
+    </div>
+  </form>
+</mat-dialog-content>
+<mat-dialog-actions align="end">
+  <button matButton="outlined" type="button" (click)="onCancel()" [disabled]="isSubmitting">
+    Cancelar
+  </button>
+  <button matButton="filled" color="primary" type="button" (click)="onSubmit()"
+    [disabled]="taskForm.invalid || isSubmitting">
+    @if (isSubmitting) {
+      Salvando...
+    } @else {
+      Salvar
+    }
+  </button>
+</mat-dialog-actions>
+
+

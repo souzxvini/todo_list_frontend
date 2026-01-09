@@ -73,8 +73,6 @@
 }
 
 .task-item.done {
-  cursor: not-allowed;
-
   .task-item-description, .task-item-title {
     color: #8f8f8f !important;
   }

@@ -1,0 +1,15 @@
+<h2 mat-dialog-title>Confirmar Logout</h2>
+
+<mat-dialog-content>
+  <p>Tem certeza que deseja sair da sua conta?</p>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button matButton="outlined" type="button" (click)="onCancel()">
+    Cancelar
+  </button>
+  <button matButton="filled" color="primary" type="button" (click)="onConfirm()">
+    Sair
+  </button>
+</mat-dialog-actions>
+
