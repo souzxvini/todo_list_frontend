@@ -1,4 +1,4 @@
-name: Provision Infra + Deploy Angular
+name: Provision Infra (Terraform) + Deploy Angular (S3/CloudFront)
 
 on:
   push:
@@ -12,9 +12,19 @@ permissions:
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+
+  # Seu bucket de state remoto
   TF_STATE_BUCKET_NAME: ${{ vars.TF_STATE_BUCKET_NAME }}
-  # Se você aplicou o patch do Terraform (bucket_name), use S3_BUCKET_NAME:
+
+  # Bucket da aplicação (se seu Terraform usar var.bucket_name)
   S3_BUCKET_NAME: ${{ vars.S3_BUCKET_NAME }}
+
+  # Ajuste para a estrutura do seu repo:
+  TF_WORKDIR: infra
+  APP_WORKDIR: frontend
+
+  # Onde guardar state dentro do bucket de state:
+  TF_STATE_KEY: profile/prod/terraform.tfstate
 
 jobs:
   terraform:
@@ -29,6 +39,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug - show tf files
+        run: |
+          echo "Repo root:"
+          pwd
+          ls -la
+          echo "Searching for *.tf (maxdepth 5):"
+          find . -maxdepth 5 -name "*.tf" -print
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -41,22 +59,30 @@ jobs:
           terraform_version: "1.7.5"
 
       - name: Terraform Init
+        working-directory: ${{ env.TF_WORKDIR }}
         run: |
           terraform init \
             -backend-config="bucket=${TF_STATE_BUCKET_NAME}" \
-            -backend-config="key=profile/prod/terraform.tfstate" \
+            -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}"
 
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: terraform validate
+
       - name: Terraform Plan
+        working-directory: ${{ env.TF_WORKDIR }}
         run: |
           terraform plan -out=tfplan \
             -var="bucket_name=${S3_BUCKET_NAME}"
 
       - name: Terraform Apply
+        working-directory: ${{ env.TF_WORKDIR }}
         run: terraform apply -auto-approve tfplan
 
       - name: Read Terraform outputs
         id: tf_outputs
+        working-directory: ${{ env.TF_WORKDIR }}
         shell: bash
         run: |
           BUCKET_NAME="$(terraform output -raw bucket_name)"
@@ -64,6 +90,10 @@ jobs:
 
           echo "bucket_name=$BUCKET_NAME" >> "$GITHUB_OUTPUT"
           echo "distribution_id=$DIST_ID" >> "$GITHUB_OUTPUT"
+
+          echo "Terraform outputs:"
+          echo "bucket_name=$BUCKET_NAME"
+          echo "cloudfront_distribution_id=$DIST_ID"
 
   deploy:
     name: Build + Deploy Angular
@@ -74,41 +104,56 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Angular
-        run: npm run build -- --configuration production
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ${{ env.APP_WORKDIR }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ env.APP_WORKDIR }}
+        run: npm ci
+
+      - name: Build Angular (production)
+        working-directory: ${{ env.APP_WORKDIR }}
+        run: npm run build -- --configuration production
+
+      - name: Detect dist folder
+        id: dist
+        shell: bash
+        run: |
+          set -e
+
+          echo "Listing dist folders..."
+          ls -la "${APP_WORKDIR}/dist" || true
+
+          # Pega o primeiro diretório dentro de dist
+          DIST_DIR="$(ls -d "${APP_WORKDIR}"/dist/* 2>/dev/null | head -n 1 || true)"
+
+          if [ -z "$DIST_DIR" ]; then
+            echo "ERROR: dist folder not found. Check your Angular build output."
+            exit 1
+          fi
+
+          # Se existir /browser, prefere ele (Angular SSR / novos builders)
+          if [ -d "$DIST_DIR/browser" ]; then
+            DIST_DIR="$DIST_DIR/browser"
+          fi
+
+          echo "dist_dir=$DIST_DIR" >> "$GITHUB_OUTPUT"
+          echo "Using DIST_DIR=$DIST_DIR"
+
       - name: Upload to S3 (sync)
         shell: bash
         run: |
-          # Ajuste o caminho do dist se necessário:
-          # Angular normalmente gera dist/<nome-do-projeto>/browser (Angular 17+) ou dist/<nome-do-projeto>
-          #
-          # Opção 1 (mais comum):
-          # DIST_DIR="dist/<SEU_PROJETO>"
-          #
-          # Opção 2 (Angular SSR/Builders modernos):
-          # DIST_DIR="dist/<SEU_PROJETO>/browser"
-
-          # Tentativa automática (pega o primeiro diretório dentro de dist):
-          DIST_DIR="$(ls -d dist/* | head -n 1)"
-          echo "Using DIST_DIR=$DIST_DIR"
-
-          aws s3 sync "$DIST_DIR" "s3://${{ needs.terraform.outputs.bucket_name }}/" \
+          aws s3 sync "${{ steps.dist.outputs.dist_dir }}" "s3://${{ needs.terraform.outputs.bucket_name }}/" \
             --delete \
             --only-show-errors
 
