@@ -8,39 +8,16 @@ variable "bucket_name" {
   type = string
 }
 
-variable "project_name" {
-  type        = string
-  description = "Nome do projeto (prefixo dos recursos)"
-  default     = "todo-list-frontend"
-}
-
 variable "environment" {
   type        = string
   description = "Ambiente (dev, staging, prod)"
   default     = "dev"
 }
 
-variable "s3_bucket_name" {
-  type        = string
-  description = "Nome do bucket S3 para hospedar o frontend"
-}
-
 variable "price_class" {
   type        = string
   description = "Price class do CloudFront (PriceClass_100, PriceClass_200, PriceClass_All)"
   default     = "PriceClass_200"
-}
-
-variable "enable_create_resources" {
-  type        = bool
-  description = "Se true, cria recursos se não existirem. Se false, assume que já existem"
-  default     = true
-}
-
-variable "aws_region" {
-  type        = string
-  default     = "us-east-1"
-  description = "AWS region to deploy resources into"
 }
 
 variable "domain_name" {
