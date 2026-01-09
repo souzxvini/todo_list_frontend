@@ -2,6 +2,7 @@ import { CdkDrag, CdkDragDrop, CdkDropList, moveItemInArray, transferArrayItem }
 import { Component } from '@angular/core';
 import { MatButtonModule} from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-home',
@@ -33,9 +34,9 @@ export class Home {
     sessionStorage.clear();
     localStorage.clear();
   
-    const logoutUri = encodeURIComponent('http://localhost:4200'); // ou '/'
+    const logoutUri = encodeURIComponent(environment.appUrl);
     window.location.href =
-      `https://us-east-174rxy2but.auth.us-east-1.amazoncognito.com/logout` +
+      `${environment.cognitoLogoutUrl}` +
       `?client_id=7lt80c43cs8mplhdop9r3ao57n` +
       `&logout_uri=${logoutUri}`;
   }
