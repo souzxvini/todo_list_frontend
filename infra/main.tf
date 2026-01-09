@@ -115,7 +115,6 @@ resource "aws_cloudfront_distribution" "frontend" {
       for_each = [1]
       content {
         restriction_type = "none"
-        # NÃO declare locations aqui (nem vazio)
       }
     }
   }
