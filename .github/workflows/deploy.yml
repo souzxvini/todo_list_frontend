@@ -21,7 +21,7 @@ env:
 
   # Ajuste para a estrutura do seu repo:
   TF_WORKDIR: infra
-  APP_WORKDIR: frontend
+  APP_WORKDIR: .
 
   # Onde guardar state dentro do bucket de state:
   TF_STATE_KEY: profile/prod/terraform.tfstate
