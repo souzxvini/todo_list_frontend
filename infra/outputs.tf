@@ -18,7 +18,7 @@ output "cloudfront_arn" {
   value       = aws_cloudfront_distribution.profile_distribution.arn
 }
 
-output "s3_bucket_name" {
+output "bucket_name" {
   description = "Nome do bucket S3"
   value       = aws_s3_bucket.profile_bucket.id
 }
