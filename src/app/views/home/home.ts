@@ -3,8 +3,8 @@ import { Component, inject } from '@angular/core';
 import { MatButtonModule} from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatDialog } from '@angular/material/dialog';
-import { NewTaskDialog } from './new-task-dialog/new-task-dialog';
-import { ConfirmLogoutDialog } from './confirm-logout-dialog/confirm-logout-dialog';
+import { NewTaskDialog } from '../../modals/new-task-dialog/new-task-dialog';
+import { ConfirmLogoutDialog } from '../../modals/confirm-logout-dialog/confirm-logout-dialog';
 
 @Component({
   selector: 'app-home',

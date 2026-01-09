@@ -6,7 +6,7 @@ import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { TasksService } from '../../../services/tasks.service';
+import { TasksService } from '../../services/tasks.service';
 import { MatIconModule } from '@angular/material/icon';
 import { finalize } from 'rxjs';
 

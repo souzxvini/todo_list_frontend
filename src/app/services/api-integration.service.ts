@@ -8,7 +8,7 @@ import { environment } from '../../environments/environment';
 })
 export class ApiIntegrationService {
   private readonly http = inject(HttpClient);
-  private readonly apiUrl = environment.apiUrl || 'http://localhost:3000';
+  private readonly apiUrl = environment.apiUrl;
 
   post<T>(endpoint: string, data: any): Observable<T> {
     return this.http.post<T>(`${this.apiUrl}${endpoint}`, data);
